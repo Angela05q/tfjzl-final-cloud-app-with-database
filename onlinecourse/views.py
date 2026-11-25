@@ -1,7 +1,7 @@
 from django.shortcuts import render
 from django.http import HttpResponseRedirect
 # <HINT> Import any new Models here
-from .models import Course, Enrollment
+from .models import Course, Enrollment, Question, Choice, Submission
 from django.contrib.auth.models import User
 from django.shortcuts import get_object_or_404, render, redirect
 from django.urls import reverse
@@ -134,3 +134,68 @@ def extract_answers(request):
 
 
 
+
+
+def submit(request, course_id):
+    course = get_object_or_404(Course, pk=course_id)
+    user = request.user
+
+    if not user.is_authenticated:
+        return redirect("onlinecourse:login")
+
+    if request.method != "POST":
+        return redirect("onlinecourse:course_details", pk=course_id)
+
+    enrollment = get_object_or_404(
+        Enrollment, user=user, course=course
+    )
+
+    submission = Submission.objects.create(enrollment=enrollment)
+    choices = Choice.objects.filter(
+        id__in=extract_answers(request),
+        question__course=course
+    )
+    submission.choices.set(choices)
+
+    return HttpResponseRedirect(
+        reverse(
+            viewname="onlinecourse:exam_result",
+            args=(course_id, submission.id)
+        )
+    )
+
+
+def show_exam_result(request, course_id, submission_id):
+    if not request.user.is_authenticated:
+        return redirect("onlinecourse:login")
+
+    course = get_object_or_404(Course, pk=course_id)
+    submission = get_object_or_404(
+        Submission,
+        id=submission_id,
+        enrollment__course=course,
+        enrollment__user=request.user
+    )
+    choices = submission.choices.all()
+
+    total_score = 0
+    questions = course.question_set.all()
+
+    for question in questions:
+        correct_choices = question.choice_set.filter(is_correct=True)
+        selected_choices = choices.filter(question=question)
+
+        if set(correct_choices) == set(selected_choices):
+            total_score += question.grade
+
+    context = {
+        "course": course,
+        "grade": total_score,
+        "choices": choices
+    }
+
+    return render(
+        request,
+        "onlinecourse/exam_result_bootstrap.html",
+        context
+    )
